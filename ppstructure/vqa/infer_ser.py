@@ -26,15 +26,18 @@ from copy import deepcopy
 import paddle
 
 # relative reference
-from vqa_utils import parse_args, get_image_file_list, draw_ser_results, get_bio_label_maps
+from vqa_utils import parse_args, get_image_file_list, draw_ser_results, get_bio_label_maps_idcard
 from paddlenlp.transformers import LayoutXLMModel, LayoutXLMTokenizer, LayoutXLMForTokenClassification
 from paddlenlp.transformers import LayoutLMModel, LayoutLMTokenizer, LayoutLMForTokenClassification
+from paddlenlp.transformers import LayoutLMv2Model, LayoutLMv2Tokenizer, LayoutLMv2ForTokenClassification
 
 MODELS = {
     'LayoutXLM':
     (LayoutXLMTokenizer, LayoutXLMModel, LayoutXLMForTokenClassification),
     'LayoutLM':
-    (LayoutLMTokenizer, LayoutLMModel, LayoutLMForTokenClassification)
+    (LayoutLMTokenizer, LayoutLMModel, LayoutLMForTokenClassification),
+    'LayoutLMv2':
+    (LayoutLMv2Tokenizer, LayoutLMv2Model, LayoutLMv2ForTokenClassification),
 }
 
 
@@ -171,7 +174,7 @@ def postprocess(attention_mask, preds, label_map_path):
         preds = preds.numpy()
     preds = np.argmax(preds, axis=2)
 
-    _, label_map = get_bio_label_maps(label_map_path)
+    _, label_map, _ = get_bio_label_maps_idcard(label_map_path)
 
     preds_list = [[] for _ in range(preds.shape[0])]
 
@@ -188,7 +191,7 @@ def merge_preds_list_with_ocr_info(label_map_path, ocr_info, segment_offset_id,
                                    preds_list):
     # must ensure the preds_list is generated from the same image
     preds = [p for pred in preds_list for p in pred]
-    label2id_map, _ = get_bio_label_maps(label_map_path)
+    label2id_map, _, _= get_bio_label_maps_idcard(label_map_path)
     for key in label2id_map:
         if key.startswith("I-"):
             label2id_map[key] = label2id_map["B" + key[1:]]
@@ -239,12 +242,15 @@ def infer(args):
     ocr_results = dict()
     with open(args.ocr_json_path, "r", encoding='utf-8') as fin:
         lines = fin.readlines()
-        for line in lines:
+        infer_imgs = []
+        for line in lines[:1]:
             img_name, json_info = line.split("\t")
+            class_type = '_'.join(img_name.split('_')[:-1])
+            infer_imgs.append(os.path.join(args.infer_imgs, class_type, img_name))
             ocr_results[os.path.basename(img_name)] = json.loads(json_info)
 
     # get infer img list
-    infer_imgs = get_image_file_list(args.infer_imgs)
+    # infer_imgs = get_image_file_list(args.infer_imgs)
 
     # loop for infer
     with open(
@@ -271,7 +277,7 @@ def infer(args):
                     bbox=inputs["bbox"],
                     token_type_ids=inputs["token_type_ids"],
                     attention_mask=inputs["attention_mask"])
-            elif args.ser_model_type == 'LayoutXLM':
+            elif args.ser_model_type == 'LayoutXLM' or args.ser_model_type == 'LayoutLMv2':
                 preds = model(
                     input_ids=inputs["input_ids"],
                     bbox=inputs["bbox"],
@@ -281,9 +287,9 @@ def infer(args):
                 preds = preds[0]
 
             preds = postprocess(inputs["attention_mask"], preds,
-                                args.label_map_path)
+                                args.label_path)
             ocr_info = merge_preds_list_with_ocr_info(
-                args.label_map_path, ocr_info, inputs["segment_offset_id"],
+                args.label_path, ocr_info, inputs["segment_offset_id"],
                 preds)
 
             fout.write(img_path + "\t" + json.dumps(
