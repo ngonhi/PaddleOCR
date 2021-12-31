@@ -90,7 +90,8 @@ def train(args):
         contains_re=False,
         add_special_ids=False,
         return_attention_mask=True,
-        load_mode='all')
+        load_mode='all',
+        online_augment=args.online_augment)
     eval_dataset = IDCardDataset(
         tokenizer,
         image_data_dir=args.image_data_dir,
@@ -102,7 +103,8 @@ def train(args):
         contains_re=False,
         add_special_ids=False,
         return_attention_mask=True,
-        load_mode='all')
+        load_mode='all',
+        online_augment=args.online_augment)
 
     train_sampler = paddle.io.DistributedBatchSampler(
         train_dataset, batch_size=args.per_gpu_train_batch_size, shuffle=True)
@@ -252,6 +254,6 @@ def train(args):
 
 if __name__ == "__main__":
     from clearml import Task
-    task = Task.init(project_name='LayoutXLM', task_name='layoutxlm_paddle_ocr_shuffle_1229')
+    task = Task.init(project_name='LayoutXLM', task_name='layoutxlm_paddle_ocr_1231')
     args = parse_args()
     train(args)

@@ -8,6 +8,7 @@ from .custom_augmentation import (LightFlare, ParallelLight,
                                  SpotLight, WarpTexture, 
                                  RandomLine, Blob, Shadow)
 import re
+import random
 from augment.text_augment import TextAugmentation
 text_augmentation = TextAugmentation()
 prop = {
@@ -17,6 +18,25 @@ prop = {
     'random_add_space': 0.002,
     'random_remove_word': 0.003,
 }
+
+def random_remove_textlines(ocr_info):
+    '''
+    Randomly remove textlines
+    '''
+    ret = []
+    for info in ocr_info:
+        key = info['label']
+        if 'title' in key or 'cnxh' in key: #Random remove 5%
+            if random.uniform(0, 1) > 0.05:
+                ret.append(info)
+        elif 'key' in key: #Random remove 3%
+            if random.uniform(0, 1) > 0.03:
+                ret.append(info)
+        else: # Random remove 2%
+            if random.uniform(0, 1) > 0.02:
+                ret.append(info)
+
+    return ret
 
 def augment_text(words):
     augmented_words = []

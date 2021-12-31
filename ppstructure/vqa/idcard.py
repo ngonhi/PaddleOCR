@@ -183,7 +183,7 @@ class IDCardDataset(Dataset):
         image_name, info_str = line.split("\t")
         card_type = '_'.join(image_name.split('_')[:-1])
         image_path = os.path.join(self.image_data_dir, card_type, image_name)
-        self.visualize(image_path, info_str)
+        # self.visualize(image_path, info_str)
         def add_imgge_path(x):
             x['image_path'] = image_path
             return x
