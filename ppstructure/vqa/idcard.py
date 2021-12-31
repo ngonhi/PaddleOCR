@@ -7,19 +7,10 @@ from paddle.io import Dataset
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import random
+from augment import augment
+from constants import ALL_EXCLUDE_FIELD
 
 __all__ = ['IDCardDataset']
-ALL_EXCLUDE_FIELD = set(['key_ngon_tro_trai', 'key_ngon_tro_phai', 'key_csgt', 'key_title', 'key_title_en', \
-            'key_chung_nhan', 'key_chung_nhan_1_en', 'key_chung_nhan_2_en', 'key_chung_nhan_3_en', 'note', 'so_serial', 'random_number', 'tires', 'level_nguoi_cap', \
-            'address_date', 'nguoi_cap', 'quy_dinh_them', 'bo_giao_thong', 'cuc_dan_kiem_vn', 'cuc_dan_kiem_vn_en', 'commercial', 'modification', 'equipment', 'type_fuel', \
-            'inspection_stamp', 'van_tay_trai', 'van_tay_phai', 'driver_license_bo_gtvt', 'chxh', 'title', 'ignore', 'chxh_en', 'cong_an', 'cong_an_thanh_pho_en', 'wheel_formula', \
-            'wheel_tread', 'container_dim', 'wheelbase', 'kerb_mass', 'pay_load', 'total_mass', 'towed_mass', 'engine_displace', 'max_rpm', 'inspection_report', 'cong_an_quan', \
-            'cong_an_quan_en', 'so_cho_nam', 'so_cho_dung', 'cong_suat', 'cong_an_thanh_pho', 'total_mass', 'so_cho_nam', 'chieu_dai', 'chieu_rong', 'chieu_cao', 'overall_dim', \
-            'chxh', 'signature', 'stamp_circle', 'bo_gtvt', 'bo_gtvt_en', 'title_en','key_chieu_cao', 'key_chieu_dai', 'key_chieu_rong', 'key_commercial', 'key_cong_suat', \
-            'key_container_dim', 'key_engine_displace', 'key_equipment', 'key_hang_hoa', 'key_ho_ten_khac', 'key_inspection_center', 'key_inspection_report', \
-            'key_inspection_stamp', 'key_kich_thuoc_bao', 'key_max_rpm','key_modification', 'key_note', 'key_overall_dim', 'key_pay_load', 'key_san_xuat', 'key_so_cho_dung', \
-            'key_so_cho_nam', 'key_so_serial', 'key_specification', 'key_tai_trong', 'key_ten_dong_co', 'key_tires', 'key_total_mass', 'key_towed_mass', 'key_type_fuel', \
-            'key_vehicle', 'key_wheel_formula', 'key_wheel_tread', 'key_wheelbase', 'nuoc_san_xuat'])
 
 def normalize_bbox(bbox, width, height):
     return [
@@ -42,7 +33,8 @@ class IDCardDataset(Dataset):
                  add_special_ids=False,
                  return_attention_mask=True,
                  load_mode='all',
-                 max_seq_len=512):
+                 max_seq_len=512,
+                 online_augment=False):
         super().__init__()
         self.tokenizer = tokenizer
         self.image_data_dir = image_data_dir
@@ -55,6 +47,7 @@ class IDCardDataset(Dataset):
         self.return_attention_mask = return_attention_mask
         self.load_mode = load_mode
         self.max_seq_len = max_seq_len
+        self.online_augment = online_augment
 
         if self.pad_token_label_id is None:
             self.pad_token_label_id = paddle.nn.CrossEntropyLoss().ignore_index
@@ -190,7 +183,7 @@ class IDCardDataset(Dataset):
         image_name, info_str = line.split("\t")
         card_type = '_'.join(image_name.split('_')[:-1])
         image_path = os.path.join(self.image_data_dir, card_type, image_name)
-        # self.visualize(image_path, info_str)
+        self.visualize(image_path, info_str)
         def add_imgge_path(x):
             x['image_path'] = image_path
             return x
@@ -209,6 +202,8 @@ class IDCardDataset(Dataset):
             or 'dk_oto_back' in image_path \
             or 'dk_xemay_back' in image_path):
             label = 'loai_xe'
+        elif label == 'key_noi_cap' and 'cmca_front' in image_path:
+            label = 'other'
         elif label.isdigit() \
             or label.startswith('en_') \
                 or label.startswith('unit_') \
@@ -231,7 +226,6 @@ class IDCardDataset(Dataset):
         height = info_dict["height"]
         width = info_dict["width"]
 
-        words_list = []
         bbox_list = []
         input_ids_list = []
         token_type_ids_list = []
@@ -244,7 +238,16 @@ class IDCardDataset(Dataset):
             id2label = {}
             entity_id_to_index_map = {}
             empty_entity = set()
-        for info in info_dict["ocr_info"]:
+        
+        ocr_info = info_dict['ocr_info']
+        if self.online_augment: # Random remove textlines
+            ocr_info = augment.random_remove_textlines(ocr_info)
+
+        for info in ocr_info:
+            text = info["text"]
+            label = info["label"]
+            if (label == 'van_tay_trai' or label == 'van_tay_phai') and 'cm_back' in image_path:
+                continue
             if self.contains_re:
                 # for re
                 if len(info["text"]) == 0:
@@ -255,16 +258,17 @@ class IDCardDataset(Dataset):
 
             # x1, y1, x2, y2
             bbox = info["bbox"]
-            label = info["label"]
 
             # Normalize bbox
             bbox = normalize_bbox(bbox, height, width)
 
-            text = info["text"]
+            if self.online_augment: 
+                # Text augment
+                text = augment.augment_text(text)
+
             encode_res = self.tokenizer.encode(
                 text, pad_to_max_seq_len=False, return_attention_mask=True)
             # encoded_res['input_ids'] = [[CLS], ..., [SEP]] 
-            gt_label = []
             if not self.add_special_ids:
                 # TODO: use tok.all_special_ids to remove
                 encode_res["input_ids"] = encode_res["input_ids"][1:-1]
@@ -272,6 +276,7 @@ class IDCardDataset(Dataset):
                                                                             -1]
                 encode_res["attention_mask"] = encode_res["attention_mask"][1:
                                                                             -1]
+            gt_label = []
             keys = list(self.entities_labels.keys())
             label = self._get_label(label, image_path)
             if label == 'other' or label not in keys:
@@ -294,7 +299,6 @@ class IDCardDataset(Dataset):
             token_type_ids_list.extend(encode_res["token_type_ids"])
             bbox_list.extend([bbox] * len(encode_res["input_ids"]))
             gt_label_list.extend(gt_label)
-            words_list.append(text)
 
         encoded_inputs = {
             "input_ids": input_ids_list,
@@ -453,6 +457,8 @@ class IDCardDataset(Dataset):
 
 
     def visualize(self, image_path, info_str):
+        if 'pp' not in image_path:
+            return 
         color = 'red'
         def draw_box_txt(draw, bbox, label, font):
             draw.rectangle(bbox, fill=color)
@@ -469,6 +475,8 @@ class IDCardDataset(Dataset):
         for item in json.loads(info_str)['ocr_info']:
             bbox = item['bbox']
             label = item['label']
+            if label != 'key_ngay_cap':
+                continue
             label = self._get_label(label, image_path)
             draw_box_txt(draw, bbox, label, font)
         img_new = Image.blend(image, img_new, 0.3)
